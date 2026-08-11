@@ -21,28 +21,45 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
+// GET all cases
+app.MapGet("/api/cases", async (AppDbContext db) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    var cases = await db.Cases.ToListAsync();
+    return Results.Ok(cases);
+});
 
-app.MapGet("/weatherforecast", () =>
+// GET a single case by id
+app.MapGet("/api/cases/{id}", async (int id, AppDbContext db) =>
 {
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    var singleCase = await db.Cases.FindAsync(id);
+    return singleCase is not null ? Results.Ok(singleCase) : Results.NotFound();
+});
+
+// POST a new case
+app.MapPost("/api/cases", async (Case newCase, AppDbContext db) =>
+{
+    newCase.CreatedAt = DateTime.UtcNow;
+    newCase.Status = "Open";
+    db.Cases.Add(newCase);
+    await db.SaveChangesAsync();
+    return Results.Created($"/api/cases/{newCase.Id}", newCase);
+});
+
+// PUT: claim a case
+app.MapPut("/api/cases/{id}/claim", async (int id, string claimedByUserId, AppDbContext db) =>
+{
+    var existingCase = await db.Cases.FindAsync(id);
+    if (existingCase is null) return Results.NotFound();
+
+    if (existingCase.Status == "Claimed")
+        return Results.BadRequest("This case is already claimed.");
+
+    existingCase.Status = "Claimed";
+    existingCase.ClaimedByUserId = claimedByUserId;
+    existingCase.ClaimedAt = DateTime.UtcNow;
+
+    await db.SaveChangesAsync();
+    return Results.Ok(existingCase);
+});
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
