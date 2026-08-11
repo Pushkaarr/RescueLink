@@ -123,7 +123,7 @@ app.MapPost("/api/cases", async (Case newCase, AppDbContext db) =>
     return Results.Created($"/api/cases/{newCase.Id}", newCase);
 });
 
-app.MapPut("/api/cases/{id}/claim", async (int id, string claimedByUserId, AppDbContext db) =>
+app.MapPut("/api/cases/{id}/claim", async (int id, ClaimsPrincipal claimsUser, AppDbContext db) =>
 {
     var existingCase = await db.Cases.FindAsync(id);
     if (existingCase is null) return Results.NotFound();
@@ -131,13 +131,17 @@ app.MapPut("/api/cases/{id}/claim", async (int id, string claimedByUserId, AppDb
     if (existingCase.Status == "Claimed")
         return Results.BadRequest("This case is already claimed.");
 
+    var userId = claimsUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                  ?? claimsUser.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+
     existingCase.Status = "Claimed";
-    existingCase.ClaimedByUserId = claimedByUserId;
+    existingCase.ClaimedByUserId = userId;
     existingCase.ClaimedAt = DateTime.UtcNow;
 
     await db.SaveChangesAsync();
     return Results.Ok(existingCase);
-});
+})
+.RequireAuthorization();
 
 app.Run();
 
