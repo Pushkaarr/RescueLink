@@ -154,7 +154,47 @@ app.MapPut("/api/cases/{id}/claim", async (int id, ClaimsPrincipal claimsUser, A
 })
 .RequireAuthorization();
 
+// ---------- COMMENT ENDPOINTS ----------
+
+app.MapGet("/api/cases/{caseId}/comments", async (int caseId, AppDbContext db) =>
+{
+    var comments = await db.Comments
+        .Where(c => c.CaseId == caseId)
+        .OrderBy(c => c.CreatedAt)
+        .ToListAsync();
+    return Results.Ok(comments);
+});
+
+app.MapPost("/api/cases/{caseId}/comments", async (int caseId, CommentRequest request, ClaimsPrincipal claimsUser, AppDbContext db) =>
+{
+    var caseExists = await db.Cases.AnyAsync(c => c.Id == caseId);
+    if (!caseExists) return Results.NotFound("Case not found.");
+
+   var userIdString = claimsUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                    ?? claimsUser.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    var userId = int.Parse(userIdString!);
+
+    var user = await db.Users.FindAsync(userId);
+    if (user is null) return Results.Unauthorized();
+
+    var comment = new Comment
+    {
+        CaseId = caseId,
+        UserId = userId,
+        UserName = user.FullName,
+        Message = request.Message,
+        CreatedAt = DateTime.UtcNow
+    };
+
+    db.Comments.Add(comment);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/api/cases/{caseId}/comments/{comment.Id}", comment);
+})
+.RequireAuthorization();
+
 app.Run();
 
 record SignupRequest(string FullName, string Email, string PhoneNumber, string Password);
 record LoginRequest(string Email, string Password);
+record CommentRequest(string Message);
