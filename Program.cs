@@ -154,6 +154,29 @@ app.MapPut("/api/cases/{id}/claim", async (int id, ClaimsPrincipal claimsUser, A
 })
 .RequireAuthorization();
 
+app.MapPut("/api/cases/{id}/unclaim", async (int id, ClaimsPrincipal claimsUser, AppDbContext db) =>
+{
+    var existingCase = await db.Cases.FindAsync(id);
+    if (existingCase is null) return Results.NotFound();
+
+    if (existingCase.Status != "Claimed")
+        return Results.BadRequest("This case is not currently claimed.");
+
+    var userId = claimsUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                  ?? claimsUser.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+
+    if (existingCase.ClaimedByUserId != userId)
+        return Results.Forbid();
+
+    existingCase.Status = "Open";
+    existingCase.ClaimedByUserId = null;
+    existingCase.ClaimedAt = null;
+
+    await db.SaveChangesAsync();
+    return Results.Ok(existingCase);
+})
+.RequireAuthorization();
+
 // ---------- COMMENT ENDPOINTS ----------
 
 app.MapGet("/api/cases/{caseId}/comments", async (int caseId, AppDbContext db) =>
