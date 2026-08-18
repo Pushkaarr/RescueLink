@@ -5,6 +5,9 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using RescueLink.Api.Models;
+using Twilio;
+using Twilio.Rest.Api.V2010.Account;
+using Twilio.Types;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -44,6 +47,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization();
+
+var twilioSid = builder.Configuration["Twilio:AccountSid"]!;
+var twilioAuthToken = builder.Configuration["Twilio:AuthToken"]!;
+TwilioClient.Init(twilioSid, twilioAuthToken);
 
 var app = builder.Build();
 
@@ -125,12 +132,36 @@ app.MapGet("/api/cases/{id}", async (int id, AppDbContext db) =>
     return singleCase is not null ? Results.Ok(singleCase) : Results.NotFound();
 });
 
-app.MapPost("/api/cases", async (Case newCase, AppDbContext db) =>
+app.MapPost("/api/cases", async (Case newCase, AppDbContext db, IConfiguration config) =>
 {
     newCase.CreatedAt = DateTime.UtcNow;
     newCase.Status = "Open";
     db.Cases.Add(newCase);
     await db.SaveChangesAsync();
+
+    try
+    {
+        var fromNumber = config["Twilio:WhatsAppFrom"]!;
+        var toNumber = config["Twilio:NotifyToWhatsApp"]!;
+
+        var contentVariables = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            { "1", newCase.Severity },
+            { "2", newCase.AnimalType },
+            { "3", newCase.Description }
+        });
+        await MessageResource.CreateAsync(
+            contentSid: "HXb2d56da6fe0b1821ad8b9b1a14fd4498",
+            contentVariables: contentVariables,
+            from: new PhoneNumber(fromNumber),
+            to: new PhoneNumber(toNumber)
+        );
+    }
+    catch (Exception ex)
+    {
+       Console.WriteLine("WHATSAPP ERROR: " + ex.Message);
+    }
+
     return Results.Created($"/api/cases/{newCase.Id}", newCase);
 });
 
