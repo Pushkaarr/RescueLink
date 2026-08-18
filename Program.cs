@@ -177,6 +177,36 @@ app.MapPut("/api/cases/{id}/unclaim", async (int id, ClaimsPrincipal claimsUser,
 })
 .RequireAuthorization();
 
+app.MapPut("/api/cases/{id}/override-claim", async (int id, ClaimsPrincipal claimsUser, AppDbContext db) =>
+{
+    var existingCase = await db.Cases.FindAsync(id);
+    if (existingCase is null) return Results.NotFound();
+
+    if (existingCase.Status != "Claimed")
+        return Results.BadRequest("This case is not currently claimed.");
+
+    if (existingCase.Severity != "Critical")
+        return Results.BadRequest("Override is only allowed for critical cases.");
+
+    var userIdString = claimsUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                        ?? claimsUser.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    var userId = int.Parse(userIdString!);
+
+    var user = await db.Users.FindAsync(userId);
+    if (user is null) return Results.Unauthorized();
+
+    var isTrusted = user.IsVerifiedNgo || user.CasesHelpedCount >= 5;
+    if (!isTrusted)
+        return Results.Forbid();
+
+    existingCase.ClaimedByUserId = userId.ToString();
+    existingCase.ClaimedAt = DateTime.UtcNow;
+
+    await db.SaveChangesAsync();
+    return Results.Ok(existingCase);
+})
+.RequireAuthorization();
+
 // ---------- COMMENT ENDPOINTS ----------
 
 app.MapGet("/api/cases/{caseId}/comments", async (int caseId, AppDbContext db) =>
